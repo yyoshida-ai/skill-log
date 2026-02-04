@@ -3,132 +3,261 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>新卒ディレクター成長ログ (クラウド同期版)</title>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <title>ビットセンス新卒社員研修ポータル (クラウド同期版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap');
-        body { font-family: 'Noto Sans JP', sans-serif; background-color: #f8fafc; }
-        .lucide { width: 1em; height: 1em; display: inline-block; vertical-align: middle; stroke-width: 2; }
+        body { font-family: 'M PLUS Rounded 1c', sans-serif; background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%); min-height: 100vh; position: relative; overflow-x: hidden; }
+        .bubble { position: absolute; background: rgba(255, 255, 255, 0.4); border-radius: 50%; z-index: 0; animation: float 15s infinite ease-in-out; }
+        @keyframes float { 0% { transform: translateY(100vh) scale(0); opacity: 0; } 20% { opacity: 0.6; } 100% { transform: translateY(-20vh) scale(1.5); opacity: 0; } }
+        .category-card { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(10px); border: 2px solid white; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); z-index: 10; }
+        .link-item:hover { background-color: #f0f9ff; transform: translateX(4px); }
+        body.editing .edit-visible { display: flex; }
+        body:not(.editing) .edit-visible { display: none; }
+        .delete-btn { opacity: 0; transition: opacity 0.2s; }
+        body.editing .link-item:hover .delete-btn, body.editing .category-card:hover .delete-btn { opacity: 1; }
+        /* 同期中ステータスバー */
+        .sync-banner { position: fixed; top: 0; left: 0; width: 100%; height: 4px; z-index: 100; transition: all 0.5s; }
     </style>
 </head>
-<body>
-    <div id="root"></div>
+<body class="pb-20">
+    <div id="sync-banner" class="sync-banner bg-transparent"></div>
+    <div id="bubbles-container" class="fixed inset-0 pointer-events-none overflow-hidden"></div>
 
-    <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+    <header class="relative z-10 pt-12 pb-8 px-6 text-center">
+        <div class="inline-block relative">
+            <h1 class="text-4xl md:text-5xl font-bold text-sky-600 mb-2 tracking-wide drop-shadow-sm">
+                <i class="fas fa-rocket mr-3 text-yellow-400"></i>ビットセンス<br class="md:hidden">新卒社員研修ポータル
+            </h1>
+            <div class="h-1.5 w-full bg-gradient-to-r from-yellow-300 to-sky-300 rounded-full mt-2"></div>
+        </div>
+        <p id="cloud-status" class="text-sky-700/60 mt-4 font-medium text-sm">クラウド接続中...</p>
+    </header>
 
+    <main class="relative z-10 container mx-auto px-4 md:px-8">
+        <div id="portal-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"></div>
+        <div class="mt-8 text-center edit-visible justify-center">
+            <button onclick="addCategory()" class="bg-white border-2 border-dashed border-sky-300 text-sky-500 font-bold py-3 px-8 rounded-xl hover:bg-sky-50 transition-all flex items-center shadow-sm">
+                <i class="fas fa-plus-circle mr-2 text-xl"></i> 新しいカテゴリを追加
+            </button>
+        </div>
+    </main>
+
+    <div class="fixed bottom-6 right-6 z-50 flex items-center gap-4 bg-white/90 backdrop-blur px-4 py-2 rounded-full shadow-lg border border-sky-100">
+        <span class="text-sm font-bold text-sky-600 mr-2"><i class="fas fa-pen-to-square"></i> 編集モード</span>
+        <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="edit-toggle" class="sr-only peer" onchange="toggleEditMode()">
+            <div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-sky-500 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div>
+        </label>
+    </div>
+
+    <div id="modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl">
+            <h3 id="modal-title" class="text-2xl font-bold text-gray-800 mb-6 border-b-2 border-sky-100 pb-2">リンクを追加</h3>
+            <div class="space-y-4">
+                <input type="text" id="link-title" class="w-full px-4 py-2 rounded-lg border border-gray-300" placeholder="タイトル">
+                <input type="text" id="link-url" class="w-full px-4 py-2 rounded-lg border border-gray-300" placeholder="URL">
+                <input type="text" id="link-icon" class="w-full px-4 py-2 rounded-lg border border-gray-300" placeholder="fa-solid fa-link">
+            </div>
+            <div class="mt-8 flex justify-end gap-3">
+                <button onclick="closeModal()" class="px-5 py-2 text-gray-500 font-bold">キャンセル</button>
+                <button onclick="saveLink()" class="px-6 py-2 bg-sky-500 text-white rounded-lg shadow-md font-bold">保存する</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
         // ==========================================
-        // 【ここを書き換えてください】
+        // 【設定】JSONbinの情報をここに入れる
         // ==========================================
-        const BIN_ID = "6983283bae596e708f105d93"; // あなたのIDを入れました
+        const BIN_ID = "6983283bae596e708f105d93"; 
         const MASTER_KEY = "$2a$10$q4bNG0bRY3SEdnb8XumWLOwYdF4nwiO2oLU90SEn18OIKQ9cxICii"; 
         // ==========================================
 
-        const Icons = {
-            Briefcase: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>,
-            CheckCircle2: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>,
-            Circle: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"/></svg>,
-            Cloud: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M17.5 19c2.5 0 4.5-2 4.5-4.5 0-2.3-1.7-4.2-4-4.5A7 7 0 1 0 5 13c0 .1 0 .2.1.3A5 5 0 0 0 6 22h11.5Z"/></svg>
-        };
-
-        const defaultSkills = [
-            { id: 101, category: "Business", theme: "基礎スキル", label: "電話対応：企業名・要件を聞き取り正しく取り取り次げる", month: 1 },
-            { id: 102, category: "Business", theme: "基礎スキル", label: "メール対応：ビジネスマナーに則った返信ができる", month: 1 },
-            { id: 103, category: "Business", theme: "ツール活用", label: "Slack：メンションを使い分け適切に連絡できる", month: 1 },
-            // ... (他のデータも同様にここに入ります)
+        const defaultData = [
+            { id: 'cat-1', title: '研修カリキュラム', color: 'bg-blue-100', icon: 'fa-solid fa-graduation-cap', links: [
+                { id: 'l1', title: '5ヶ月育成ロードマップ', url: 'calendar.html', icon: 'fa-solid fa-route' },
+                { id: 'l2', title: 'できるようになったことリスト', url: 'skill_tracker.html', icon: 'fa-solid fa-check-double' }
+            ]}
         ];
 
-        const App = () => {
-            const [completedIds, setCompletedIds] = useState([]);
-            const [isSyncing, setIsSyncing] = useState(false);
-            const [isLoaded, setIsLoaded] = useState(false);
+        let portalData = [];
+        let isEditing = false;
+        let currentEditCategory = null;
+        let currentEditLink = null;
 
-            // 1. 初回起動時にクラウドからデータを読み込む
-            useEffect(() => {
-                fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+        // 起動時にデータを取得
+        async function init() {
+            createBubbles();
+            await loadData();
+        }
+
+        async function loadData() {
+            updateStatus("読み込み中...", "bg-yellow-400");
+            try {
+                const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
                     headers: { 'X-Master-Key': MASTER_KEY }
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.record && data.record.completedIds) {
-                        setCompletedIds(data.record.completedIds);
-                    }
-                    setIsLoaded(true);
-                })
-                .catch(err => {
-                    console.error("読み込みエラー:", err);
-                    setIsLoaded(true);
                 });
-            }, []);
+                const data = await res.json();
+                // portalDataキーが存在すれば読み込む、なければデフォルト
+                portalData = data.record.portalData || defaultData;
+                renderPortal();
+                updateStatus("クラウドと同期完了", "bg-emerald-400");
+                setTimeout(() => updateStatus("", "bg-transparent"), 2000);
+            } catch (err) {
+                updateStatus("同期エラー", "bg-red-500");
+                portalData = defaultData;
+                renderPortal();
+            }
+        }
 
-            // 2. データをクラウドに保存する
-            const saveToCloud = (newIds) => {
-                setIsSyncing(true);
-                fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+        async function syncToCloud() {
+            updateStatus("クラウドへ保存中...", "bg-blue-500");
+            try {
+                // 他のデータ（日報など）を消さないために最新を一度とってから上書き
+                const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+                    headers: { 'X-Master-Key': MASTER_KEY }
+                });
+                const current = await res.json();
+                
+                const updatedRecord = { ...current.record, portalData: portalData };
+
+                await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Master-Key': MASTER_KEY
-                    },
-                    body: JSON.stringify({ completedIds: newIds })
-                })
-                .then(() => {
-                    setTimeout(() => setIsSyncing(false), 500);
-                })
-                .catch(err => {
-                    console.error("保存エラー:", err);
-                    setIsSyncing(false);
+                    headers: { 'Content-Type': 'application/json', 'X-Master-Key': MASTER_KEY },
+                    body: JSON.stringify(updatedRecord)
                 });
-            };
+                updateStatus("保存完了", "bg-emerald-400");
+                setTimeout(() => updateStatus("", "bg-transparent"), 2000);
+            } catch (err) {
+                updateStatus("保存失敗", "bg-red-500");
+                alert("保存できませんでした。APIキーの設定を確認してください。");
+            }
+        }
 
-            const toggleComplete = (id) => {
-                const nextIds = completedIds.includes(id) 
-                    ? completedIds.filter(i => i !== id) 
-                    : [...completedIds, id];
-                setCompletedIds(nextIds);
-                saveToCloud(nextIds); // 変更のたびに保存
-            };
+        function updateStatus(text, colorClass) {
+            const banner = document.getElementById('sync-banner');
+            const statusText = document.getElementById('cloud-status');
+            banner.className = `sync-banner ${colorClass}`;
+            if(text) statusText.innerText = text;
+        }
 
-            if (!isLoaded) return <div className="flex h-screen items-center justify-center">同期中...</div>;
-
-            return (
-                <div className="max-w-2xl mx-auto p-6">
-                    <header className="flex justify-between items-center mb-8 bg-white p-4 rounded-xl shadow-sm border">
-                        <h1 className="text-xl font-bold flex items-center gap-2">
-                            <Icons.Briefcase className="text-blue-600" /> 成長ログ
-                        </h1>
-                        <div className={`flex items-center gap-2 text-xs ${isSyncing ? 'text-blue-500' : 'text-green-500'}`}>
-                            <Icons.Cloud size={16} className={isSyncing ? 'animate-pulse' : ''} />
-                            {isSyncing ? '同期中...' : 'クラウド保存済み'}
+        function renderPortal() {
+            const container = document.getElementById('portal-grid');
+            container.innerHTML = '';
+            portalData.forEach(cat => {
+                const card = document.createElement('div');
+                card.className = 'category-card rounded-2xl shadow-sm overflow-hidden flex flex-col h-full';
+                card.innerHTML = `
+                    <div class="p-4 ${cat.color} border-b border-white/50 flex justify-between items-center relative group">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center text-lg shadow-sm"><i class="${cat.icon}"></i></div>
+                            <h2 class="font-bold text-gray-700 text-lg px-1 rounded hover:bg-white/50" ${isEditing ? 'contenteditable="true" onblur="updateCategoryTitle(this, \'' + cat.id + '\')"' : ''}>${cat.title}</h2>
                         </div>
-                    </header>
-
-                    <div className="space-y-3">
-                        {defaultSkills.map(skill => (
-                            <div 
-                                key={skill.id}
-                                onClick={() => toggleComplete(skill.id)}
-                                className={`p-4 rounded-lg border cursor-pointer transition-all flex items-center gap-3 ${completedIds.includes(skill.id) ? 'bg-blue-50 border-blue-200' : 'bg-white hover:bg-gray-50'}`}
-                            >
-                                <div className={completedIds.includes(skill.id) ? 'text-blue-600' : 'text-gray-300'}>
-                                    {completedIds.includes(skill.id) ? <Icons.CheckCircle2 fill="currentColor" className="text-blue-600 fill-blue-100" /> : <Icons.Circle />}
-                                </div>
-                                <div>
-                                    <div className="text-xs text-gray-400 font-bold">{skill.theme}</div>
-                                    <div className={`text-sm ${completedIds.includes(skill.id) ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{skill.label}</div>
-                                </div>
-                            </div>
-                        ))}
+                        <button onclick="deleteCategory('${cat.id}')" class="delete-btn absolute right-3 top-3 text-red-400 bg-white rounded-full w-8 h-8 edit-visible items-center justify-center shadow-sm"><i class="fas fa-trash-alt"></i></button>
                     </div>
-                </div>
-            );
-        };
+                    <div class="p-3 flex-1">
+                        <ul class="space-y-2 link-list min-h-[50px]" data-cat-id="${cat.id}">
+                            ${cat.links.map(link => `
+                                <li class="link-item bg-white border border-gray-100 rounded-lg shadow-sm relative group">
+                                    <a href="${link.url}" target="_blank" class="flex items-center p-3 text-gray-600 hover:text-sky-600">
+                                        <i class="${link.icon} w-6 text-center text-gray-400 mr-2"></i>
+                                        <span class="font-medium truncate">${link.title}</span>
+                                    </a>
+                                    <div class="absolute right-2 top-1/2 -translate-y-1/2 flex gap-2 delete-btn edit-visible">
+                                        <button onclick="openEditModal('${cat.id}', '${link.id}')" class="text-gray-400 hover:text-sky-500 p-1"><i class="fas fa-pen"></i></button>
+                                        <button onclick="deleteLink('${cat.id}', '${link.id}')" class="text-gray-400 hover:text-red-500 p-1"><i class="fas fa-times"></i></button>
+                                    </div>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                    <div class="p-3 bg-gray-50/50 border-t border-gray-100 edit-visible">
+                        <button onclick="openAddModal('${cat.id}')" class="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-400 font-bold hover:bg-white transition-all text-sm"><i class="fas fa-plus mr-1"></i> リンク追加</button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+            if(isEditing) initSortable();
+        }
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        // --- 共通ロジック（元のコードを継承） ---
+        function toggleEditMode() {
+            isEditing = document.getElementById('edit-toggle').checked;
+            document.body.classList.toggle('editing', isEditing);
+            if(!isEditing) syncToCloud(); // 編集終了時に保存
+            renderPortal();
+        }
+
+        function addCategory() {
+            portalData.push({ id: 'cat-' + Date.now(), title: '新規カテゴリ', color: 'bg-sky-100', icon: 'fa-solid fa-folder', links: [] });
+            renderPortal();
+        }
+
+        function deleteCategory(id) { if(confirm('削除しますか？')) { portalData = portalData.filter(c => c.id !== id); renderPortal(); } }
+
+        function updateCategoryTitle(el, id) { const cat = portalData.find(c => c.id === id); if(cat) cat.title = el.innerText; }
+
+        function deleteLink(catId, linkId) { const cat = portalData.find(c => c.id === catId); if(cat) { cat.links = cat.links.filter(l => l.id !== linkId); renderPortal(); } }
+
+        function openAddModal(catId) { currentEditCategory = catId; currentEditLink = null; document.getElementById('modal').classList.remove('hidden'); }
+
+        function openEditModal(catId, linkId) {
+            currentEditCategory = catId; currentEditLink = linkId;
+            const link = portalData.find(c => c.id === catId).links.find(l => l.id === linkId);
+            document.getElementById('link-title').value = link.title;
+            document.getElementById('link-url').value = link.url;
+            document.getElementById('link-icon').value = link.icon;
+            document.getElementById('modal').classList.remove('hidden');
+        }
+
+        function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+        function saveLink() {
+            const title = document.getElementById('link-title').value;
+            const url = document.getElementById('link-url').value;
+            const icon = document.getElementById('link-icon').value || 'fa-solid fa-link';
+            const cat = portalData.find(c => c.id === currentEditCategory);
+            if(currentEditLink) {
+                const link = cat.links.find(l => l.id === currentEditLink);
+                link.title = title; link.url = url; link.icon = icon;
+            } else {
+                cat.links.push({ id: 'l-' + Date.now(), title, url, icon });
+            }
+            renderPortal(); closeModal();
+        }
+
+        function createBubbles() {
+            const container = document.getElementById('bubbles-container');
+            for(let i = 0; i < 15; i++) {
+                const b = document.createElement('div'); b.className = 'bubble';
+                const s = Math.random() * 60 + 20;
+                b.style.width = b.style.height = `${s}px`; b.style.left = `${Math.random() * 100}%`;
+                b.style.animationDelay = `${Math.random() * 10}s`; container.appendChild(b);
+            }
+        }
+
+        function initSortable() {
+            document.querySelectorAll('.link-list').forEach(el => {
+                new Sortable(el, { group: 'links', animation: 150, onEnd: () => {
+                    // 並び順を反映
+                    const catId = el.getAttribute('data-cat-id');
+                    const cat = portalData.find(c => c.id === catId);
+                    const newLinks = [];
+                    el.querySelectorAll('.link-item').forEach(item => {
+                        // タイトルから逆引きして配列再構成（簡易的）
+                        const t = item.querySelector('span').innerText;
+                        const original = cat.links.find(l => l.title === t);
+                        if(original) newLinks.push(original);
+                    });
+                    cat.links = newLinks;
+                }});
+            });
+        }
+
+        window.onload = init;
     </script>
 </body>
 </html>
